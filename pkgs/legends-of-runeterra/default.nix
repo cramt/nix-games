@@ -143,6 +143,15 @@
       # installer dialogs, which otherwise deadlock an unattended first run.
       export WINEDLLOVERRIDES="winemenubuilder.exe=d;mscoree,mshtml=d"
 
+      # DXVK must be declared native or wine uses its builtin d3d11 regardless of
+      # the DLLs being present. Set here rather than in the normal-launch path so
+      # the FIRST session gets it too: first run execs the installer, and the
+      # client then launches the game from inside that same process tree, so an
+      # override set later never applies to it. Measured: without this the game
+      # reports a fake "NVIDIA GeForce GTX 470" adapter at load ~22; with it, the
+      # real GPU at load ~4.
+      export WINEDLLOVERRIDES="$WINEDLLOVERRIDES;d3d11,dxgi,d3d10core=n"
+
       # The launcher is Electron. On this wine its GPU process cannot create a GL
       # drawable (err:winediag:create_gl_drawable) and the window paints pure
       # black. Forcing Mesa's software path makes it render. This does NOT cost
@@ -217,9 +226,6 @@
       fi
 
       # ---- normal launch ----
-      # DXVK must be declared native or wine uses its own builtin d3d11.
-      export WINEDLLOVERRIDES="$WINEDLLOVERRIDES;d3d11,dxgi,d3d10core=n"
-
       exec "$WINE" "$PFX/drive_c/Riot Games/Riot Client/RiotClientServices.exe" \
         --launch-product=bacon --launch-patchline=live
     '';
