@@ -117,6 +117,24 @@
         "$WINE" wineboot -u >"$LOGS/wineboot.log" 2>&1 || true
         "${wine-ge}/bin/wineserver" -w 2>/dev/null || true
 
+        # Suppress wine's standalone systray. Without this a black 32x32 square
+        # sits in the top-left corner of the desktop the whole time the client
+        # runs: wine's tray holder window, unembedded because Wayland desktops
+        # have no XEmbed tray to adopt it.
+        #
+        # This gates only ShowWindow() on the tray window (x11drv_main.c) — the
+        # windows are still created, so Shell_NotifyIcon succeeds and the app is
+        # none the wiser. Do NOT reach for WINEDLLOVERRIDES=explorer.exe=d
+        # instead: measured, it kills the client dead after ~6s, because wine's
+        # explorer also does window management.
+        #
+        # Two locations: wine <=9.21 reads a string under "X11 Driver",
+        # newer wine reads a DWORD under "Explorer". Setting both is harmless.
+        "$WINE" reg add 'HKCU\Software\Wine\X11 Driver' /v ShowSystray /d N /f \
+          >/dev/null 2>&1 || true
+        "$WINE" reg add 'HKCU\Software\Wine\Explorer' /v ShowSystray /t REG_DWORD /d 0 /f \
+          >/dev/null 2>&1 || true
+
         echo "installing DXVK (routes the game's D3D11 through Vulkan)"
         for d in d3d11 dxgi d3d10core; do
           install -Dm644 "${dxvk}/x64/$d.dll" "$PFX/drive_c/windows/system32/$d.dll"
@@ -189,10 +207,9 @@ in
         libXi
         libXinerama
         libXcomposite
-        libXfixes
-        libXxf86vm
-        libxcb
       ])
+      # these moved out of the deprecated xorg set to top level
+      ++ [pkgs.libxcb pkgs.libxfixes pkgs.libxxf86vm]
       ++ (with gst_all_1; [gstreamer gst-plugins-base gst-plugins-good]);
 
     meta = with lib; {

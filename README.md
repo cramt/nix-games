@@ -81,13 +81,32 @@ The installer URL is fetched at runtime rather than pinned with a hash on
 purpose: Riot rebuilds that URL in place (observed 2026-08-11), so a pinned hash
 would rot and break the package rather than the game.
 
-### Known annoyance
+### The black square in the corner
 
-A black 32×32 square sits in the top-left corner while the client runs. It's
-wine's systray holder window, unembedded because the desktop has no XEmbed tray
-to adopt it. Cosmetic. Note that `WINEDLLOVERRIDES=explorer.exe=d` removes it
-but **breaks the client entirely** — wine's explorer also does window
-management, and the client exits after ~6s with no window.
+On Wayland desktops a black 32×32 square appears in the top-left corner
+whenever the client runs. It's wine's standalone systray holder window,
+unembedded because Wayland compositors generally don't own
+`_NET_SYSTEM_TRAY_S0` and so never adopt it.
+
+This package sets `ShowSystray` in the prefix, which fixes it:
+
+```
+HKCU\Software\Wine\X11 Driver  ShowSystray  = "N"   (wine <= 9.21)
+HKCU\Software\Wine\Explorer    ShowSystray  = 0     (newer wine)
+```
+
+That gates only `ShowWindow()` on the tray window — the windows are still
+created, so `Shell_NotifyIcon` succeeds and the app is none the wiser.
+
+**Do not** use `WINEDLLOVERRIDES=explorer.exe=d` instead. It removes the square
+but kills the client after ~6s with no window at all, because wine's explorer
+also handles desktop and window management. Measured the hard way.
+
+Side effect: the tray icon becomes invisible, hence unclickable. Close the
+client via its own window. If you want the icon usable in your panel, an
+XEmbed→StatusNotifierItem bridge (`xembedsniproxy`, in
+`kdePackages.plasma-workspace`) is the direction — COSMIC's lead dev names it as
+the fix in [cosmic-epoch#974](https://github.com/pop-os/cosmic-epoch/issues/974).
 
 ## Adding a game
 
