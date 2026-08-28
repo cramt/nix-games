@@ -157,8 +157,23 @@
       # ---- first run: init prefix, install DXVK, fetch + run the installer ----
       if [ ! -e "$PFX/drive_c/Riot Games/Riot Client/RiotClientServices.exe" ]; then
         echo "first run: initialising wine prefix (this takes a minute)"
-        "$WINE" wineboot -u >"$LOGS/wineboot.log" 2>&1 || true
+        if ! "$WINE" wineboot -u >"$LOGS/wineboot.log" 2>&1; then
+          echo "wineboot failed:" >&2
+          tail -5 "$LOGS/wineboot.log" >&2
+          exit 1
+        fi
         "${wine-ge}/bin/wineserver" -w 2>/dev/null || true
+
+        # Fail loudly if the prefix did not actually populate. wineboot can exit
+        # 0 while having done nothing useful, and a 13MB prefix then produces
+        # confusing failures several steps later — the DXVK copy and the
+        # installer download both "succeed" because neither needs wine at all.
+        dll_count=$(find "$PFX/drive_c/windows/system32" -name '*.dll' 2>/dev/null | wc -l)
+        if [ "$dll_count" -lt 100 ]; then
+          echo "wine prefix looks empty (only $dll_count dlls in system32)." >&2
+          echo "see $LOGS/wineboot.log" >&2
+          exit 1
+        fi
 
         # Suppress wine's standalone systray. Without this a black 32x32 square
         # sits in the top-left corner of the desktop the whole time the client
@@ -173,16 +188,19 @@
         #
         # Two locations: wine <=9.21 reads a string under "X11 Driver",
         # newer wine reads a DWORD under "Explorer". Setting both is harmless.
+        echo "disabling wine's systray (kills the black corner square)"
         "$WINE" reg add 'HKCU\Software\Wine\X11 Driver' /v ShowSystray /d N /f \
-          >/dev/null 2>&1 || true
+          >>"$LOGS/wineboot.log" 2>&1 \
+          || echo "warning: could not set ShowSystray (X11 Driver)" >&2
         "$WINE" reg add 'HKCU\Software\Wine\Explorer' /v ShowSystray /t REG_DWORD /d 0 /f \
-          >/dev/null 2>&1 || true
+          >>"$LOGS/wineboot.log" 2>&1 \
+          || echo "warning: could not set ShowSystray (Explorer)" >&2
 
         echo "installing DXVK (routes the game's D3D11 through Vulkan)"
         for d in d3d11 dxgi d3d10core; do
-          install -Dm644 "${dxvk}/x64/$d.dll" "$PFX/drive_c/windows/system32/$d.dll"
+          install -Dm644 "${dxvk.bin}/x64/$d.dll" "$PFX/drive_c/windows/system32/$d.dll"
           if [ -d "$PFX/drive_c/windows/syswow64" ]; then
-            install -Dm644 "${dxvk}/x32/$d.dll" "$PFX/drive_c/windows/syswow64/$d.dll"
+            install -Dm644 "${dxvk.bin}/x32/$d.dll" "$PFX/drive_c/windows/syswow64/$d.dll"
           fi
         done
 
@@ -227,6 +245,11 @@ in
       [
         glibc
         zlib
+        # wine's ntdll.so links against libunwind. Without it every wine
+        # invocation dies with "could not load ntdll.so: libunwind.so.8", and
+        # because the DXVK copy and the installer download need no wine at all,
+        # the failure surfaces several steps later as something else entirely.
+        pkgs.libunwind
         libGL
         vulkan-loader
         libxkbcommon
@@ -249,6 +272,28 @@ in
         ocl-icd
         pkgs.curl
       ]
+      # The Riot Client is Electron, so it wants a full CEF/GTK stack.
+      ++ (with pkgs; [
+        nss
+        nspr
+        gtk3
+        atk
+        at-spi2-atk
+        at-spi2-core
+        pango
+        cairo
+        gdk-pixbuf
+        glib
+        dbus
+        expat
+        libdrm
+        libxshmfence
+        libglvnd
+        wayland
+        libnotify
+        libsecret
+        sqlite
+      ])
       ++ (with xorg; [
         libX11
         libXext
@@ -256,11 +301,15 @@ in
         libXrender
         libXcursor
         libXi
-        libXinerama
-        libXcomposite
       ])
       # these moved out of the deprecated xorg set to top level
-      ++ [pkgs.libxcb pkgs.libxfixes pkgs.libxxf86vm]
+      ++ [
+        pkgs.libxcb
+        pkgs.libxfixes
+        pkgs.libxxf86vm
+        pkgs.libxinerama
+        pkgs.libxcomposite
+      ]
       ++ (with gst_all_1; [gstreamer gst-plugins-base gst-plugins-good]);
 
     meta = with lib; {
