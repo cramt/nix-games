@@ -19,6 +19,9 @@
   buildFHSEnv,
   writeShellApplication,
   writeText,
+  makeDesktopItem,
+  copyDesktopItems,
+  imagemagick,
   # runtime
   dxvk,
   coreutils,
@@ -79,6 +82,46 @@
   # URL in place (observed 2026-08-11), so pinning a hash would rot immediately
   # and break the package rather than the game.
   installerUrl = "https://bacon.secure.dyn.riotcdn.net/channels/public/x/installer/current/live.live.americas.exe";
+
+  # Riot's own icon, straight from the CDN path their client config advertises
+  # (keystone.products.bacon -> platforms.win.icon_path). Shipped as a .ico, so
+  # convert to the PNG sizes the XDG icon spec wants.
+  icon = stdenvNoCC.mkDerivation {
+    pname = "legends-of-runeterra-icon";
+    version = "1";
+    src = fetchurl {
+      url = "https://bacon.secure.dyn.riotcdn.net/channels/public/rccontent/theme/lor.ico";
+      hash = "sha256-dhFo9vVLjOVLFWTtB0bfLZ7OpojbVD0NblXX3eOZAro=";
+    };
+    dontUnpack = true;
+    nativeBuildInputs = [imagemagick];
+    installPhase = ''
+      runHook preInstall
+      # an .ico holds several sizes; split them and keep the square ones
+      magick "$src" icon-%d.png
+      for f in icon-*.png; do
+        size=$(magick identify -format '%w' "$f")
+        h=$(magick identify -format '%h' "$f")
+        [ "$size" = "$h" ] || continue
+        d="$out/share/icons/hicolor/''${size}x''${size}/apps"
+        mkdir -p "$d"
+        cp "$f" "$d/legends-of-runeterra.png"
+      done
+      runHook postInstall
+    '';
+  };
+
+  desktopItem = makeDesktopItem {
+    name = "legends-of-runeterra";
+    desktopName = "Legends of Runeterra";
+    comment = "Riot's strategy card game, via GE-Proton";
+    icon = "legends-of-runeterra";
+    exec = "legends-of-runeterra";
+    terminal = false;
+    categories = ["Game" "CardGame"];
+    keywords = ["lor" "riot" "runeterra" "cards"];
+    startupWMClass = "lor.exe";
+  };
 
   launcher = writeShellApplication {
     name = "legends-of-runeterra-unwrapped";
@@ -171,6 +214,14 @@ in
   buildFHSEnv {
     name = "legends-of-runeterra";
     runScript = "${launcher}/bin/legends-of-runeterra-unwrapped";
+
+    # buildFHSEnv only produces $out/bin, so the desktop entry and icons have to
+    # be linked in explicitly for the game to show up in application launchers.
+    extraInstallCommands = ''
+      mkdir -p "$out/share"
+      ln -s ${desktopItem}/share/applications "$out/share/applications"
+      ln -s ${icon}/share/icons "$out/share/icons"
+    '';
 
     targetPkgs = pkgs:
       [
